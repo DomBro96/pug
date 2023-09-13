@@ -166,3 +166,105 @@ func (r *Reader) nextChunk(first bool) error {
 		r.i, r.j, r.n = 0, 0, n
 	}
 }
+
+// Next returns a reader for the next journal. It returns io.EOF if there are no
+// more journals. The reader returned becomes stale after the next Next call,
+// and should no longer be used. If strict is false, the reader will returns
+// io.ErrUnexpectedEOF error when found corrupted journal.
+func (r *Reader) Next() (io.Reader, error) {
+	r.seq++
+	if r.err != nil {
+		return nil, r.err
+	}
+
+	r.i = r.j
+	for {
+		if err := r.nextChunk(true); err == nil {
+			break
+		} else if err != errSkip {
+			return nil, err
+		}
+	}
+	return &singleReader{r, r.seq, nil}, nil
+}
+
+// Reset resets the journal reader, allows reuse of the journal reader. Reset returns
+// last accumulated error.
+func (r *Reader) Reset(reader io.Reader, dropper Dropper, strict, checksum bool) error {
+	r.seq++
+	err := r.err
+	r.r = reader
+	r.dropper = dropper
+	r.strict = strict
+	r.checksum = checksum
+	r.i = 0
+	r.j = 0
+	r.n = 0
+	r.last = true
+	r.err = nil
+
+	return err
+}
+
+type singleReader struct {
+	r   *Reader
+	seq int
+	err error
+}
+
+func (x *singleReader) Read(p []byte) (int, error) {
+	r := x.r
+	if r.seq != x.seq {
+		return 0, errors.New("leveldb/journal: stale reader")
+	}
+	if x.err != nil {
+		return 0, x.err
+	}
+	if r.err != nil {
+		return 0, r.err
+	}
+	for r.i == r.j {
+		if r.last {
+			return 0, io.EOF
+		}
+		x.err = r.nextChunk(false)
+		if x.err != nil {
+			if x.err == errSkip {
+				x.err = io.ErrUnexpectedEOF
+			}
+			return 0, x.err
+		}
+	}
+	n := copy(p, r.buf[r.i:r.j])
+	r.i += n
+
+	return n, nil
+}
+
+func (x *singleReader) ReadByte() (byte, error) {
+	r := x.r
+	if r.seq != x.seq {
+		return 0, errors.New("leveldb/journal: stale reader")
+	}
+	if x.err != nil {
+		return 0, x.err
+	}
+	if r.err != nil {
+		return 0, r.err
+	}
+	for r.i == r.j {
+		if r.last {
+			return 0, io.EOF
+		}
+		x.err = r.nextChunk(false)
+		if x.err != nil {
+			if x.err == errSkip {
+				x.err = io.ErrUnexpectedEOF
+			}
+			return 0, x.err
+		}
+	}
+	c := r.buf[r.i]
+	r.i++
+	return c, nil
+}
