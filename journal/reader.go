@@ -27,18 +27,18 @@ const (
 )
 
 const (
-	checksumStart = 0
-	checksumEnd   = 4
-	lengthStart   = 4
-	lengthEnd     = 6
-	chunkType     = 6
+	idxChecksumStart = 0
+	idxChecksumEnd   = 4
+	idxLengthStart   = 4
+	idxLengthEnd     = 6
+	idxChunkType     = 6
 )
 
 const (
-	fullChunkType = iota + 1
-	firstChunkType
-	middleChunkType
-	lastChunkType
+	chunkTypeFull = iota + 1
+	chunkTypeFirst
+	chunkTypeMiddle
+	chunkTypeLast
 )
 
 //  Reader reads journals from an underlying io.Reader.
@@ -95,9 +95,9 @@ func (r *Reader) corrupt(n int, reason string, skip bool) error {
 func (r *Reader) nextChunk(first bool) error {
 	for {
 		if r.j+headerSize <= r.n {
-			checksum := binary.LittleEndian.Uint32(r.buf[r.j+checksumStart : r.j+checksumEnd])
-			length := binary.LittleEndian.Uint16(r.buf[r.j+lengthStart : r.j+lengthEnd])
-			chunkType := r.buf[r.j+chunkType]
+			checksum := binary.LittleEndian.Uint32(r.buf[r.j+idxChecksumStart : r.j+idxChecksumEnd])
+			length := binary.LittleEndian.Uint16(r.buf[r.j+idxLengthStart : r.j+idxLengthEnd])
+			chunkType := r.buf[r.j+idxChunkType]
 			unprocBlock := r.n - r.j
 
 			if checksum == 0 && length == 0 && chunkType == 0 {
@@ -107,7 +107,7 @@ func (r *Reader) nextChunk(first bool) error {
 				return r.corrupt(unprocBlock, "zero header", false)
 			}
 
-			if chunkType < fullChunkType || chunkType > lastChunkType {
+			if chunkType < chunkTypeFull || chunkType > chunkTypeLast {
 				// Drop entire block.
 				r.i = r.n
 				r.j = r.n
@@ -131,14 +131,14 @@ func (r *Reader) nextChunk(first bool) error {
 				return r.corrupt(unprocBlock, "checksum mismatch", false)
 			}
 
-			if first && chunkType != fullChunkType && chunkType != firstChunkType {
+			if first && chunkType != chunkTypeFull && chunkType != chunkTypeFirst {
 				chunkLength := (r.j - r.i) + headerSize
 				r.i = r.j
 				// Report the error, but skip it.
 				return r.corrupt(chunkLength, "orphan chunk", true)
 			}
 
-			r.last = chunkType == fullChunkType || chunkType == lastChunkType
+			r.last = chunkType == chunkTypeFull || chunkType == chunkTypeLast
 			return nil
 		}
 

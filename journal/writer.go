@@ -1,6 +1,11 @@
 package journal
 
-import "io"
+import (
+	"encoding/binary"
+	"io"
+
+	"github.com/dombro/pug/util"
+)
 
 // Writer writes journals to an underlying io.Writer.
 type Writer struct {
@@ -32,4 +37,27 @@ func NewWriter(w io.Writer) *Writer {
 		w: w,
 		f: f,
 	}
+}
+
+// fillHeader fills in the header for the pending chunk.
+func (w *Writer) fillHeader(last bool) {
+	if w.i+headerSize > w.j || w.j > blockSize {
+		panic("pug/journal: bad writer state")
+	}
+	if last {
+		if w.first {
+			w.buf[w.i+idxChunkType] = chunkTypeFull
+		} else {
+			w.buf[w.i+idxChunkType] = chunkTypeLast
+		}
+	} else {
+		if w.first {
+			w.buf[w.i+6] = chunkTypeFirst
+		} else {
+			w.buf[w.i+6] = chunkTypeMiddle
+		}
+	}
+
+	binary.LittleEndian.PutUint32(w.buf[w.i+idxChecksumStart:w.i+idxChecksumEnd], util.NewCRC(w.buf[w.i+idxLengthStart:w.j]).Value())
+	binary.LittleEndian.PutUint16(w.buf[w.i+idxLengthStart:w.i+idxLengthEnd], uint16(w.j-w.i-headerSize))
 }
